@@ -7,7 +7,7 @@ const io = require('socket.io')(http);
 
 const players = {};
 function addPlayer (socketId, username) { 
-  players[socketId] = { username, inGame: null } 
+  players[socketId] = { username, inGame: null, keys_pressed: { up: false, down: false, space: false } } 
 };
 function usernameIsValid(username) {
   for (const id in players) {
@@ -27,12 +27,22 @@ function getNewGameId() {
 function newGame(hostId, playerId) {
   const newGameId = getNewGameId();
   games[newGameId] = { 
-    [hostId]: { 
-      connected: false
-    }, 
-    [playerId]: { 
-      connected: false
-    } 
+    id: newGameId,
+    interval_ref: null,
+    game_loop_ref: null,
+    players: {
+      [hostId]: { 
+        connected: false,
+        paddle_location: 0
+      }, 
+      [playerId]: { 
+        connected: false,
+        paddle_location: 0
+      },
+    },
+    player_1: null,
+    player_2: null,
+    turn: null
   };
   return newGameId;
 }
@@ -76,24 +86,46 @@ io.on('connection', (socket) => {
   socket.on("loaded_game", function(playerId) {
     const { inGame } = players[playerId];
     const game = games[inGame];
-    game[playerId].connected = true;
+    game.players[playerId].connected = true;
     
     let connectedPlayers = 0;
-    for (const id in games) {
-      for (const playerId in games[id]) {
-        const { connected } = games[id][playerId];
-        if (connected) connectedPlayers++
-      }
+    for (const id in game.players) {
+      const { connected } = game.players[id];
+      if (connected) connectedPlayers++;
     }
  
-    if (connectedPlayers === 2) { 
-      for (const id in game){
-        io.to(id).emit("start_game", socket.id);
+    if (connectedPlayers !== 2) return socket.emit("waiting_for_player");
+    
+    for (const id in game.players){
+      io.to(id).emit("start_game", socket.id);
+    }
+
+    const [player_1, player_2] = Object.keys(game.players);
+    game.player_1 = player_1;
+    game.player_2 = player_2;
+    game.game_loop_ref = gameLoop(game);
+    game.interval_ref = setInterval(game.game_loop_ref, 100);
+  });
+
+  socket.on("player_input", function({ isPressed, key }) {
+    players[socket.id].keys_pressed[key] = isPressed;
+  });
+
+  const gameLoop = (game) => () => {
+    game.turn = (!game.turn || game.turn === "player_2") ? "player_1" : "player_2";
+    for (const id in game.players) {
+      if (!players[id]) console.log("Handle player disconnect");
+      else {
+        const { keys_pressed: { up, down, space } } = players[id];
+        if (up) game.players[id].paddle_location--;
+        if (down) game.players[id].paddle_location++;
       }
     }
-    else socket.emit("waiting_for_player");
-   
-  });
+
+    for (const id in game.players){
+      io.to(id).emit("game_updated", game);
+    }
+  }
 });
 
 http.listen(PORT, () => {

@@ -3,6 +3,7 @@ const root_ref = document.getElementById("root");
 let playerName = "";
 let playerId = "";
 let players = {};
+let gameTick;
 
 let handleChangePlayers = null;
 let gameId = null;
@@ -99,15 +100,15 @@ function HostGamePage() {
     handleChangePlayers = function() {
         let updatePlayerList = "";
         for (const id in players) {
-            const { username } = players[id];
-            if (username !== playerName) updatePlayerList += `
+            const { username, inGame } = players[id];
+            if (username !== playerName && !inGame) updatePlayerList += `
                 <div id="${id}" class="players-list-player">
                     <div>${username}</div>
                     <button>Challenge</button>
                 </div>
             `;
         }
-        updatePlayerList = updatePlayerList || "<div>There are currently no players online.</div>"
+        updatePlayerList = updatePlayerList || "<div>Players will appear here, when they become available.</div>"
         players_ref.innerHTML = updatePlayerList;
 
         const player_nodes = players_ref.children;
@@ -171,11 +172,20 @@ function PongPage() {
     `;
 
     const game_ref = document.getElementById("game");
+    let game_tile_ref;
+    let pong_ref;
 
     socket.on("start_game", function() {
         game_ref.innerHTML = `
-            <div>Game here...</div>
+            <div id="game-tile">
+                <canvas id="pong" />
+            </div>
         `;
+
+        game_tile_ref = document.getElementById("game-tile");
+        pong_ref = document.getElementById("pong");
+        document.addEventListener("keydown", handleInput(true));
+        document.addEventListener("keyup", handleInput(false));
     });
 
     socket.on("waiting_for_player", function() {
@@ -183,6 +193,16 @@ function PongPage() {
             <div>Waiting for other player to join.</div>
         `;
     });
+
+    socket.on("game_updated", function(game) {
+        console.log(game);
+    });
+
+    const handleInput = (isPressed) => ({ key }) => {
+        if (key === "w" || key === "UpArrow") socket.emit("player_input", { isPressed, key: "up" });
+        if (key === "s" || key === "DownArrow") socket.emit("player_input", { isPressed, key: "down" });
+        if (key === "space") socket.emit("player_input", { isPressed, key: "space" });
+    }    
 
     socket.emit("loaded_game", playerId);
 }
@@ -197,7 +217,7 @@ socket.on("new_challenge", (playerId) => {
     notification_node.innerHTML = `
         <div class="notification" id="${playerId}-challenge">
             <div>You have been challenged by:</div>
-            <div>${playerId[playerId]}</div>
+            <div>${players[playerId].username}</div>
             <button id="accept-${playerId}-challenge">Accept</button>
             <button id="decline-${playerId}-challenge">Decline</button>
         </div>
